@@ -31,6 +31,10 @@ def set_seed(seed):
 
 
 def nCr(n, r):
+    """
+    算的是组合数，也就是说，5个里面取2个，大概多少种取法
+    // 符号表示整数除法，也称为地板除。它会将除法的结果向下取整到最接近的整数。这与普通的除法 / 不同，后者可能会返回一个浮点数结果。
+    """
     f = math.factorial
     return f(n) // f(r) // f(n - r)
 
@@ -42,6 +46,9 @@ def check_path(path):
 
 
 def neg_sample(item_set, item_size):  # 前闭后闭
+    """
+    负例的产生，每一项都是用户没点击过的商品
+    """
     item = random.randint(1, item_size - 1)
     while item in item_set:
         item = random.randint(1, item_size - 1)
@@ -112,11 +119,16 @@ def avg_pooling(x, dim):
 
 
 def generate_rating_matrix_valid(user_seq, num_users, num_items):
+    """
+    返回一个csr_matrix，对稀疏矩阵的表示非常的友好。取序列的 0 - n-3位置,也就是保留了最后两个
+    x: 行，代表用户
+    y：列，代表物品
+    """
     # three lists are used to construct sparse matrix
     row = []
     col = []
     data = []
-    for user_id, item_list in enumerate(user_seq):
+    for user_id, item_list in enumerate(user_seq): # debug观察到，返回序列和对应的值
         for item in item_list[:-2]:  #
             row.append(user_id)
             col.append(item)
@@ -125,6 +137,13 @@ def generate_rating_matrix_valid(user_seq, num_users, num_items):
     row = np.array(row)
     col = np.array(col)
     data = np.array(data)
+    '''
+    row：这个列表包含了每个非零元素的行索引。
+    col：这个列表包含了每个非零元素的列索引。
+    data：这个列表包含了每个非零元素的值，在这个例子中，所有的非零元素值都是1，表示用户与物品之间的交互（例如点击）。
+    构造出的csr_matrix表示了一个用户-物品的评分矩阵，其中行代表用户，列代表物品。如果用户u对物品i有交互（例如点击），
+        那么矩阵中的元素，将被设置为1，否则为0（在稀疏矩阵中，未明确设置的值默认为0）。
+    '''
     rating_matrix = csr_matrix((data, (row, col)), shape=(num_users, num_items))
 
     return rating_matrix
@@ -150,15 +169,26 @@ def generate_rating_matrix_test(user_seq, num_users, num_items):
 
 
 def get_user_seqs(data_file):
+    """
+    获取
+    user_seq: 用户点击的列表，这是个二维数组：[[1,2,3,4,5], [4,5,6,7] .....]
+    num_users: 用户数量
+    num_items: 物品数量
+    max_items: 最大的物品数量
+    valid_rating_matrix：有效数据的csr_matrix：取的子序列，但是不包含最后两位
+    test_rating_matrix：测试数据的csr_matrix: 取的子序列，但是不包含最后一位
+    """
     lines = open(data_file).readlines()
     user_seq = []
     item_set = set()
     for line in lines:
+        # line.strip()：移除字符串两端的空白字符（包括换行符）。
+        # .split(" ", 1) 第二个参数：分割次数：分割操作会从字符串的左侧开始，并且只分割指定次数。如果line是"123 4 5 6\n"，user将是"123"，items将是"4 5 6"。
         user, items = line.strip().split(" ", 1)
         items = items.split(" ")
         items = [int(item) for item in items]
         user_seq.append(items)
-        item_set = item_set | set(items)
+        item_set = item_set | set(items)  # item_set | set(items)：使用|运算符求两个集合的并集。
     max_item = max(item_set)
 
     num_users = len(lines)

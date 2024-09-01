@@ -34,7 +34,11 @@ def _ensmeble_sim_models(top_k_one, top_k_two):
 
 
 class Crop(object):
-    """Randomly crop a subseq from the original sequence"""
+    """
+    Randomly crop a subseq from the original sequence，随机裁剪出一个子序列
+    tao: 比例，裁剪的比例，10个里面0.2就是2个
+    cropped_seq：最后裁剪结果序列
+    """
 
     def __init__(self, tao=0.2):
         self.tao = tao
@@ -53,7 +57,9 @@ class Crop(object):
 
 
 class Mask(object):
-    """Randomly mask k items given a sequence"""
+    """
+    Randomly mask k items given a sequence，随机掩盖k个，将其变成0
+    """
 
     def __init__(self, gamma=0.7):
         self.gamma = gamma
@@ -70,7 +76,10 @@ class Mask(object):
 
 
 class Reorder(object):
-    """Randomly shuffle a continuous sub-sequence"""
+    """
+    Randomly shuffle a continuous sub-sequence，随机打乱其中一个子序列
+    beta：打乱的比例
+    """
 
     def __init__(self, beta=0.2):
         self.beta = beta

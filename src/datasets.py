@@ -31,12 +31,13 @@ class RecWithContrastiveLearningDataset(Dataset):
             raise ValueError(f"augmentation type: '{self.args.augment_type}' is invalided")
         print(f"Creating Contrastive Learning Dataset using '{self.args.augment_type}' data augmentation")
         self.base_transform = self.augmentations[self.args.augment_type]
-        # number of augmentations for each sequences, current support two
+        # number of augmentations for each sequences, current support two，对每个序列我们增强的数量
         self.n_views = self.args.n_views
 
     def _one_pair_data_augmentation(self, input_ids):
         """
-        provides two positive samples given one sequence
+        provides two positive samples given one sequence, 提供两个正例，也就是数据增强
+        augmented_seqs: 返回两个数据增强的序列，增强的方式是从三种方式随机选择（裁剪，）
         """
         augmented_seqs = []
         for i in range(2):
@@ -44,7 +45,7 @@ class RecWithContrastiveLearningDataset(Dataset):
             pad_len = self.max_len - len(augmented_input_ids)
             augmented_input_ids = [0] * pad_len + augmented_input_ids
 
-            augmented_input_ids = augmented_input_ids[-self.max_len :]
+            augmented_input_ids = augmented_input_ids[-self.max_len:]
 
             assert len(augmented_input_ids) == self.max_len
 
@@ -57,21 +58,28 @@ class RecWithContrastiveLearningDataset(Dataset):
         return seq_class_label
 
     def _data_sample_rec_task(self, user_id, items, input_ids, target_pos, answer):
+        """
+        数据例子产生：返回的数据，包含padding后的，锚点数据，正例，负例
+        copied_inputs_ids:
+        target_pos: 正例，是传进来的，这里只做了padding补充
+        target_neg: 负例，是获取随机序列的列表（保证每个物品都不在点击序列中），这里也进行了padding
+        cur_rec_tensors: [user_id, copied_inputs_ids, target_pos, target_neg, answer]
+        """
         # make a deep copy to avoid original sequence be modified
         copied_input_ids = copy.deepcopy(input_ids)
-        target_neg = []
+        target_neg = []  # 随机产生的负例，这个负例是通过随机数产生的，并且不存在用户序列中
         seq_set = set(items)
         for _ in copied_input_ids:
             target_neg.append(neg_sample(seq_set, self.args.item_size))
 
-        pad_len = self.max_len - len(copied_input_ids)
-        copied_input_ids = [0] * pad_len + copied_input_ids
+        pad_len = self.max_len - len(copied_input_ids)  # 假设一共点击最长是50个，不足的要补全
+        copied_input_ids = [0] * pad_len + copied_input_ids  # 注意是补在前面
         target_pos = [0] * pad_len + target_pos
         target_neg = [0] * pad_len + target_neg
 
-        copied_input_ids = copied_input_ids[-self.max_len :]
-        target_pos = target_pos[-self.max_len :]
-        target_neg = target_neg[-self.max_len :]
+        copied_input_ids = copied_input_ids[-self.max_len:]
+        target_pos = target_pos[-self.max_len:]
+        target_neg = target_neg[-self.max_len:]
 
         assert len(copied_input_ids) == self.max_len
         assert len(target_pos) == self.max_len
@@ -116,6 +124,15 @@ class RecWithContrastiveLearningDataset(Dataset):
         return inserted_sequence
 
     def __getitem__(self, index):
+        """
+        input_ids:          输入的数据 [:-3]
+        target_pos:         正例的获取，只是类似于一个移动[1:-2]
+        seq_label_signal
+        answer：
+        cur_rec_tensors:    [userId，锚点数据，正例，负例，answer]
+        cf_tensors_list：    input_ids的两个正例，也就是两个数据增强的正例，增强方式随机选择：[比例裁剪]
+        seq_class_label     seq_label_signal的tensor表示
+        """
         user_id = index
         items = self.user_seq[index]
 
@@ -125,8 +142,8 @@ class RecWithContrastiveLearningDataset(Dataset):
         # train [0, 1, 2, 3]
         # target [1, 2, 3, 4]
         if self.data_type == "train":
-            input_ids = items[:-3]
-            target_pos = items[1:-2]
+            input_ids = items[:-3]  # 输入的ids也进行了裁剪
+            target_pos = items[1:-2]  # 这是正例产生的过程，就是裁剪
             seq_label_signal = items[-2]
             answer = [0]  # no use
         elif self.data_type == "valid":
@@ -185,9 +202,9 @@ class SASRecDataset(Dataset):
         target_pos = [0] * pad_len + target_pos
         target_neg = [0] * pad_len + target_neg
 
-        input_ids = input_ids[-self.max_len :]
-        target_pos = target_pos[-self.max_len :]
-        target_neg = target_neg[-self.max_len :]
+        input_ids = input_ids[-self.max_len:]
+        target_pos = target_pos[-self.max_len:]
+        target_neg = target_neg[-self.max_len:]
 
         assert len(input_ids) == self.max_len
         assert len(target_pos) == self.max_len

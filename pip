@@ -1,0 +1,6 @@
+pip install torch>=1.2.0
+pip install tqdm==4.26.0
+pip install faiss-cpu
+pip install numpy
+pip install scipy
+pip install gensim

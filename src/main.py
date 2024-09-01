@@ -127,6 +127,19 @@ def main():
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="adam first beta value")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="adam second beta value")
 
+    '''
+    --data_name Beauty
+    --cf_weight 0.1
+    --model_idx 1
+    --gpu_id 0
+    --batch_size 256
+    --contrast_type Hybrid
+    --num_intent_cluster 256
+    --seq_representation_type mean
+    --warm_up_epoches 0
+    --intent_cf_weight 0.1
+    --num_hidden_layers 1
+    '''
     args = parser.parse_args()
 
     set_seed(args.seed)
@@ -136,11 +149,11 @@ def main():
     args.cuda_condition = torch.cuda.is_available() and not args.no_cuda
     print("Using Cuda:", torch.cuda.is_available())
     args.data_file = args.data_dir + args.data_name + ".txt"
-
+    #
     user_seq, max_item, valid_rating_matrix, test_rating_matrix = get_user_seqs(args.data_file)
 
-    args.item_size = max_item + 2
-    args.mask_id = max_item + 1
+    args.item_size = max_item + 2  # 为什么 + 2
+    args.mask_id = max_item + 1 # 为什么 + 1
 
     # save model args
     args_str = f"{args.model_name}-{args.data_name}-{args.model_idx}"
@@ -165,6 +178,12 @@ def main():
     cluster_sampler = SequentialSampler(cluster_dataset)
     cluster_dataloader = DataLoader(cluster_dataset, sampler=cluster_sampler, batch_size=args.batch_size)
 
+    single_sample = cluster_dataset[0]
+    print(single_sample)
+    for batch in cluster_dataloader:
+        print(batch)  # 打印批量样本
+        break
+
     train_dataset = RecWithContrastiveLearningDataset(
         args, user_seq[: int(len(user_seq) * args.training_data_ratio)], data_type="train"
     )
@@ -175,9 +194,15 @@ def main():
     eval_sampler = SequentialSampler(eval_dataset)
     eval_dataloader = DataLoader(eval_dataset, sampler=eval_sampler, batch_size=args.batch_size)
 
+    eval_single_sample = eval_dataset[10]
+    print(eval_single_sample)
+
     test_dataset = RecWithContrastiveLearningDataset(args, user_seq, data_type="test")
     test_sampler = SequentialSampler(test_dataset)
     test_dataloader = DataLoader(test_dataset, sampler=test_sampler, batch_size=args.batch_size)
+
+    test_single_sample = test_dataset[10]
+    print(test_single_sample)
 
     model = SASRecModel(args=args)
 
