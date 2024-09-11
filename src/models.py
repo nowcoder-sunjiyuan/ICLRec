@@ -43,6 +43,14 @@ class KMeans(object):
     def __init_cluster(
         self, hidden_size, verbose=False, niter=20, nredo=5, max_points_per_centroid=4096, min_points_per_centroid=0
     ):
+        """
+        verbose:                    是否打印详细信息，为true的时候，会将聚类的详细信息打印出来
+        niter:                      聚类的迭代次数，指定了聚类操作中心更新的迭代次数
+        nredo:                      重新聚类的次数，如果聚类结果不理想，可以重新执行聚类操作的次数
+        seed:                       随机种子，确保聚类操作的可重复性
+        max_points_per_centroid:    每个簇中心最多可以有多少个点，这是避免某些簇中心吸引了过多的点，导致聚类结果不平衡
+        min_points_per_centroid:    每个簇中心最少多少个点，这是为了避免生成过多无意义的小簇
+        """
         print(" cluster train iterations:", niter)
         clus = faiss.Clustering(hidden_size, self.num_cluster)
         clus.verbose = verbose
@@ -52,12 +60,15 @@ class KMeans(object):
         clus.max_points_per_centroid = max_points_per_centroid
         clus.min_points_per_centroid = min_points_per_centroid
 
-        res = faiss.StandardGpuResources()
-        res.noTempMemory()
-        cfg = faiss.GpuIndexFlatConfig()
-        cfg.useFloat16 = False
-        cfg.device = self.gpu_id
-        index = faiss.GpuIndexFlatL2(res, hidden_size, cfg)
+        # res = faiss.StandardGpuResources()
+        # res.noTempMemory()
+        # cfg = faiss.GpuIndexFlatConfig()
+        # cfg.useFloat16 = False
+        # cfg.device = self.gpu_id
+        # index = faiss.GpuIndexFlatL2(res, hidden_size, cfg)
+
+        # For CPU version, simply use IndexFlatL2
+        index = faiss.IndexFlatL2(hidden_size)
         return clus, index
 
     def train(self, x):
@@ -65,18 +76,18 @@ class KMeans(object):
         if x.shape[0] > self.num_cluster:
             self.clus.train(x, self.index)
         # get cluster centroids
-        centroids = faiss.vector_to_array(self.clus.centroids).reshape(self.num_cluster, self.hidden_size)
+        centroids = faiss.vector_to_array(self.clus.centroids).reshape(self.num_cluster, self.hidden_size)  # (16382,) --> (256, 64) 聚类成256个类别
         # convert to cuda Tensors for broadcast
-        centroids = torch.Tensor(centroids).to(self.device)
-        self.centroids = nn.functional.normalize(centroids, p=2, dim=1)
+        centroids = torch.Tensor(centroids).to(self.device)  # Tensor(256, 64)
+        self.centroids = nn.functional.normalize(centroids, p=2, dim=1)  # 对质心向量进行归一化处理，使得每个向量的 L2 范数（或欧几里得长度）为 1。这是通过在每个向量的维度（dim=1）上应用 L2 归一化来实现的。归一化通常有助于后续的距离计算，因为它确保了所有的向量都在同一尺度上。
 
-    def query(self, x):
+    def query(self, x):  # (256, 64)
         # self.index.add(x)
-        D, I = self.index.search(x, 1)  # for each sample, find cluster distance and assignments
-        seq2cluster = [int(n[0]) for n in I]
+        D, I = self.index.search(x, 1)  # (256, 1) (256, 1) for each sample, find cluster distance and assignments
+        seq2cluster = [int(n[0]) for n in I]  # [256]
         # print("cluster number:", self.num_cluster,"cluster in batch:", len(set(seq2cluster)))
         seq2cluster = torch.LongTensor(seq2cluster).to(self.device)
-        return seq2cluster, self.centroids[seq2cluster]
+        return seq2cluster, self.centroids[seq2cluster]  # seq2cluster: Tensor(256,), self.centroids[seq2cluster]:Tensor(256, 64)
 
 
 class KMeans_Pytorch(object):
@@ -113,16 +124,26 @@ class KMeans_Pytorch(object):
 
 
 class SASRecModel(nn.Module):
+    """
+    arg:
+        hidden_dropout_prob: 0.5。Dropout 正则化技术的模块，其核心思想是在训练过程中随机“丢弃”（即将输出置为零）神经网络中的一些神经元（即它们的输出）
+        hidden_size：64      这里面的embedding，LayerNorm都是64的维度
+    position_embeddings:
+
+
+    """
     def __init__(self, args):
         super(SASRecModel, self).__init__()
-        self.item_embeddings = nn.Embedding(args.item_size, args.hidden_size, padding_idx=0)
-        self.position_embeddings = nn.Embedding(args.max_seq_length, args.hidden_size)
+        self.item_embeddings = nn.Embedding(args.item_size, args.hidden_size, padding_idx=0)  # Embedding(12103, 64)
+        self.position_embeddings = nn.Embedding(args.max_seq_length, args.hidden_size)  # Embedding(50, 64)
         self.item_encoder = Encoder(args)
-        self.LayerNorm = LayerNorm(args.hidden_size, eps=1e-12)
+        self.LayerNorm = LayerNorm(args.hidden_size, eps=1e-12)  # 层归一化
         self.dropout = nn.Dropout(args.hidden_dropout_prob)
         self.args = args
-
+        # 交叉熵损失函数
         self.criterion = nn.BCELoss(reduction="none")
+        # self.apply(fn)是torch.nn.Module的一个方法，它会递归地将函数fn应用到模型的每一个子模块（submodule）上，
+        # self.init_weights会被自动应用到SASRecModel中定义的每一个层（比如nn.Embedding, Encoder, LayerNorm, nn.Dropout等）上。
         self.apply(self.init_weights)
 
     # Positional Embedding
@@ -142,18 +163,18 @@ class SASRecModel(nn.Module):
     # model same as SASRec
     def forward(self, input_ids):
 
-        attention_mask = (input_ids > 0).long()
-        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)  # torch.int64
-        max_len = attention_mask.size(-1)
-        attn_shape = (1, max_len, max_len)
-        subsequent_mask = torch.triu(torch.ones(attn_shape), diagonal=1)  # torch.uint8
-        subsequent_mask = (subsequent_mask == 0).unsqueeze(1)
-        subsequent_mask = subsequent_mask.long()
+        attention_mask = (input_ids > 0).long()  # (256, 50)
+        extended_attention_mask = attention_mask.unsqueeze(1).unsqueeze(2)  # torch.int64, (256, 1, 1, 50)
+        max_len = attention_mask.size(-1)  # 50
+        attn_shape = (1, max_len, max_len)  # (1, 50, 50)
+        subsequent_mask = torch.triu(torch.ones(attn_shape), diagonal=1)  # triu: 生成上三角矩阵，diagonal表示主对角线上方第几个元素开始为1 (1, 50, 50)
+        subsequent_mask = (subsequent_mask == 0).unsqueeze(1)  # (1, 1, 50, 50)
+        subsequent_mask = subsequent_mask.long()  # 将这个true，false的矩阵转化为1,0组成的矩阵, (1, 1, 50, 50)
 
         if self.args.cuda_condition:
             subsequent_mask = subsequent_mask.cuda()
 
-        extended_attention_mask = extended_attention_mask * subsequent_mask
+        extended_attention_mask = extended_attention_mask * subsequent_mask  # 256,1,1,50 * 1,1,50,50 (元素级的相乘)
         extended_attention_mask = extended_attention_mask.to(dtype=next(self.parameters()).dtype)  # fp16 compatibility
         extended_attention_mask = (1.0 - extended_attention_mask) * -10000.0
 
@@ -165,11 +186,15 @@ class SASRecModel(nn.Module):
         return sequence_output
 
     def init_weights(self, module):
-        """ Initialize the weights.
+        """
+        Initialize the weights. 当前模型的每一个子模型都会调用这个方法
+        args
+            initializer_range: 0.02 标准差
         """
         if isinstance(module, (nn.Linear, nn.Embedding)):
             # Slightly different from the TF version which uses truncated_normal for initialization
             # cf https://github.com/pytorch/pytorch/pull/5617
+            # 将这些层的权重初始化为均值为0.0、标准差为self.args.initializer_range的正态分布（高斯分布）
             module.weight.data.normal_(mean=0.0, std=self.args.initializer_range)
         elif isinstance(module, LayerNorm):
             module.bias.data.zero_()

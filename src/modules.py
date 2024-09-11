@@ -24,7 +24,7 @@ class PCLoss(nn.Module):
         self.contrast_mode = contrast_mode
         self.criterion = NCELoss(temperature, device)
 
-    def forward(self, batch_sample_one, batch_sample_two, intents, intent_ids):
+    def forward(self, batch_sample_one, batch_sample_two, intents, intent_ids):  # one: (256, 64) two:(256, 64) intents:(256, 64)
         """
         features: 
         intents: num_clusters x batch_size x hidden_dims
@@ -155,13 +155,13 @@ class NCELoss(nn.Module):
         self.cossim = nn.CosineSimilarity(dim=-1).to(self.device)
 
     # #modified based on impl: https://github.com/ae-foster/pytorch-simclr/blob/dc9ac57a35aec5c7d7d5fe6dc070a975f493c1a5/critic.py#L5
-    def forward(self, batch_sample_one, batch_sample_two, intent_ids=None):
+    def forward(self, batch_sample_one, batch_sample_two, intent_ids=None):  # (256, 3200), (256, 3200)
         # sim11 = self.cossim(batch_sample_one.unsqueeze(-2), batch_sample_one.unsqueeze(-3)) / self.temperature
         # sim22 = self.cossim(batch_sample_two.unsqueeze(-2), batch_sample_two.unsqueeze(-3)) / self.temperature
         # sim12 = self.cossim(batch_sample_one.unsqueeze(-2), batch_sample_two.unsqueeze(-3)) / self.temperature
-        sim11 = torch.matmul(batch_sample_one, batch_sample_one.T) / self.temperature
-        sim22 = torch.matmul(batch_sample_two, batch_sample_two.T) / self.temperature
-        sim12 = torch.matmul(batch_sample_one, batch_sample_two.T) / self.temperature
+        sim11 = torch.matmul(batch_sample_one, batch_sample_one.T) / self.temperature  # (256, 256) 增强数据1，样本之间的相似度
+        sim22 = torch.matmul(batch_sample_two, batch_sample_two.T) / self.temperature  # (256, 256) 增强数据2，样本之间的相似度
+        sim12 = torch.matmul(batch_sample_one, batch_sample_two.T) / self.temperature  # (256, 256) 增强数据1与2，样本之间的相似度
         d = sim12.shape[-1]
         # avoid contrast against positive intents
         if intent_ids is not None:
@@ -173,16 +173,16 @@ class NCELoss(nn.Module):
             mask_11_22[eye_metrix == 1] = 0
             sim12[mask_11_22 == 1] = float("-inf")
         else:
-            mask = torch.eye(d, dtype=torch.long).to(self.device)
-            sim11[mask == 1] = float("-inf")
+            mask = torch.eye(d, dtype=torch.long).to(self.device)  # 生成对角矩阵，
+            sim11[mask == 1] = float("-inf")  # 让对角矩阵上的元素值为 负无穷
             sim22[mask == 1] = float("-inf")
             # sim22 = sim22.masked_fill_(mask, -np.inf)
             # sim11[..., range(d), range(d)] = float('-inf')
             # sim22[..., range(d), range(d)] = float('-inf')
 
-        raw_scores1 = torch.cat([sim12, sim11], dim=-1)
-        raw_scores2 = torch.cat([sim22, sim12.transpose(-1, -2)], dim=-1)
-        logits = torch.cat([raw_scores1, raw_scores2], dim=-2)
+        raw_scores1 = torch.cat([sim12, sim11], dim=-1)  # (256, 512)
+        raw_scores2 = torch.cat([sim22, sim12.transpose(-1, -2)], dim=-1)  # (256, 512)
+        logits = torch.cat([raw_scores1, raw_scores2], dim=-2)  # (512, 512)
         labels = torch.arange(2 * d, dtype=torch.long, device=logits.device)
         nce_loss = self.criterion(logits, labels)
         return nce_loss
@@ -244,11 +244,17 @@ ACT2FN = {"gelu": gelu, "relu": F.relu, "swish": swish}
 
 
 class LayerNorm(nn.Module):
+    """
+    详细讲解请看语雀：
+    实现了一个层归一化（Layer Normalization）模块，这是一种广泛用于深度神经网络中的技术，旨在稳定训练过程、加快收敛速度，
+    并有助于缓解所谓的“内部协变量偏移”问题（即模型训练过程中，网络层输入分布的改变）。
+    forward是将一个样本进行归一化的数学公式
+    """
     def __init__(self, hidden_size, eps=1e-12):
         """Construct a layernorm module in the TF style (epsilon inside the square root).
         """
         super(LayerNorm, self).__init__()
-        self.weight = nn.Parameter(torch.ones(hidden_size))
+        self.weight = nn.Parameter(torch.ones(hidden_size))  # 有点类似于 tensorflow 中的 add_weight
         self.bias = nn.Parameter(torch.zeros(hidden_size))
         self.variance_epsilon = eps
 
@@ -288,6 +294,20 @@ class Embeddings(nn.Module):
 
 
 class SelfAttention(nn.Module):
+    """
+    args:
+        num_attention_heads:                2, 注意力头
+        attention_probs_dropout_prob:       0.5, dropout的比例
+    attention_head_size:
+    all_head_size:
+    query
+    key
+    value
+    attn_dropout
+    dense
+    LayerNorm:
+    out_dropout:
+    """
     def __init__(self, args):
         super(SelfAttention, self).__init__()
         if args.hidden_size % args.num_attention_heads != 0:
@@ -351,6 +371,12 @@ class SelfAttention(nn.Module):
 
 
 class Intermediate(nn.Module):
+    """
+    前馈神经网络，目的是对自注意力层的输出进行进一步的非线性变换没，感觉就是更好的表达吧
+
+
+    """
+
     def __init__(self, args):
         super(Intermediate, self).__init__()
         self.dense_1 = nn.Linear(args.hidden_size, args.hidden_size * 4)

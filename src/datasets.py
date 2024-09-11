@@ -14,6 +14,18 @@ import copy
 
 
 class RecWithContrastiveLearningDataset(Dataset):
+    """
+    最终返回的数据：
+    (cur_rec_tensors, cf_tensors_list, seq_class_label)
+    ([user_id, copied_inputs_ids, target_pos, target_neg, answer], cf_tensors_list, seq_class_label)
+        copied_inputs_ids:          输入的序列，(0, n-4)也就是尾部保留三位
+        target_pos:                 正例，(1, n-3)也就是copied_inputs_ids向右滑动一位，尾部保留两位
+        target_neg:                 反例，随机抽取的物品，保证物品不存在于序列中即可
+        answer:                     标签数据，但是这是对比学习，所以不需要，为0
+        cf_tensors_list:            产生的两个数据增强例子，三种增强方法随机选择一个
+        seq_class_label:
+    """
+
     def __init__(self, args, user_seq, test_neg_items=None, data_type="train", similarity_model_type="offline"):
         self.args = args
         self.user_seq = user_seq
@@ -34,14 +46,14 @@ class RecWithContrastiveLearningDataset(Dataset):
         # number of augmentations for each sequences, current support two，对每个序列我们增强的数量
         self.n_views = self.args.n_views
 
-    def _one_pair_data_augmentation(self, input_ids):
+    def _one_pair_data_augmentation(self, input_ids):  # [用户点击序列]
         """
         provides two positive samples given one sequence, 提供两个正例，也就是数据增强
-        augmented_seqs: 返回两个数据增强的序列，增强的方式是从三种方式随机选择（裁剪，）
+        augmented_seqs: 返回两个数据增强的序列，增强的方式是从三种方式随机选择（裁剪，掩码）
         """
         augmented_seqs = []
         for i in range(2):
-            augmented_input_ids = self.base_transform(input_ids)
+            augmented_input_ids = self.base_transform(input_ids)  # [增强序列]，裁剪，掩码产生的
             pad_len = self.max_len - len(augmented_input_ids)
             augmented_input_ids = [0] * pad_len + augmented_input_ids
 
@@ -49,7 +61,7 @@ class RecWithContrastiveLearningDataset(Dataset):
 
             assert len(augmented_input_ids) == self.max_len
 
-            cur_tensors = torch.tensor(augmented_input_ids, dtype=torch.long)
+            cur_tensors = torch.tensor(augmented_input_ids, dtype=torch.long)   # Tensor(50, )
             augmented_seqs.append(cur_tensors)
         return augmented_seqs
 
@@ -131,6 +143,7 @@ class RecWithContrastiveLearningDataset(Dataset):
         answer：
         cur_rec_tensors:    [userId，锚点数据，正例，负例，answer]
         cf_tensors_list：    input_ids的两个正例，也就是两个数据增强的正例，增强方式随机选择：[比例裁剪]
+                            [[增强序列1], [增强序列2]]
         seq_class_label     seq_label_signal的tensor表示
         """
         user_id = index
@@ -165,7 +178,7 @@ class RecWithContrastiveLearningDataset(Dataset):
                 cf_tensors_list.append(self._one_pair_data_augmentation(input_ids))
 
             # add supervision of sequences
-            seq_class_label = self._process_sequence_label_signal(seq_label_signal)
+            seq_class_label = self._process_sequence_label_signal(seq_label_signal)  # Tensor(1,)
             return (cur_rec_tensors, cf_tensors_list, seq_class_label)
         elif self.data_type == "valid":
             cur_rec_tensors = self._data_sample_rec_task(user_id, items, input_ids, target_pos, answer)

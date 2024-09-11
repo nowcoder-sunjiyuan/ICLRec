@@ -208,6 +208,8 @@ def main():
 
     trainer = ICLRecTrainer(model, train_dataloader, cluster_dataloader, eval_dataloader, test_dataloader, args)
 
+    # test = trainer.train(1)
+
     if args.do_eval:
         trainer.args.train_matrix = test_rating_matrix
         trainer.load(args.checkpoint_path)
